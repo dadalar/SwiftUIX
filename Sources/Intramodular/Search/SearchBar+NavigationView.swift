@@ -16,7 +16,7 @@ fileprivate struct _NavigationSearchBarConfigurator<SearchResultsContent: View>:
     
     @Environment(\._hidesNavigationSearchBarWhenScrolling) var hidesSearchBarWhenScrolling: Bool?
     
-    var automaticallyShowSearchBar: Bool? = false
+    var automaticallyShowSearchBar: Bool? = true
     var hideNavigationBarDuringPresentation: Bool?
     var obscuresBackgroundDuringPresentation: Bool?
     
@@ -27,7 +27,8 @@ fileprivate struct _NavigationSearchBarConfigurator<SearchResultsContent: View>:
     func updateUIViewController(_ uiViewController: UIViewControllerType, context: Context) {
         context.coordinator.base = self
         context.coordinator.searchBarCoordinator.base = searchBar
-        context.coordinator.uiViewController = uiViewController.navigationController?.topViewController
+        
+        searchBar._updateUISearchBar(context.coordinator.searchController.searchBar, environment: context.environment)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -39,22 +40,54 @@ fileprivate struct _NavigationSearchBarConfigurator<SearchResultsContent: View>:
 @available(iOSApplicationExtension, unavailable)
 @available(tvOSApplicationExtension, unavailable)
 extension _NavigationSearchBarConfigurator {
-    class Coordinator: NSObject, UISearchBarDelegate, UISearchControllerDelegate, UISearchResultsUpdating {
-        var base: _NavigationSearchBarConfigurator
-        var searchBarCoordinator: SearchBar.Coordinator
-        var searchController: UISearchController!
+    fileprivate class SearchController: UISearchController {
+        private var customSearchBarType: AppKitOrUIKitSearchBar.Type?
+        private var customSearchBar: UISearchBar?
         
-        weak var uiViewController: UIViewController? {
+        override var searchBar: UISearchBar {
+            if let customSearchBar = customSearchBar {
+                return customSearchBar
+            } else  if let customSearchBarType = customSearchBarType {
+                customSearchBar = customSearchBarType.init(frame: .zero)
+                
+                return customSearchBar!
+            } else {
+                return super.searchBar
+            }
+        }
+        
+        init(
+            searchResultsController: UIViewController?,
+            customSearchBarType: AppKitOrUIKitSearchBar.Type?
+        ) {
+            self.customSearchBarType = customSearchBarType
+            
+            super.init(searchResultsController: searchResultsController)
+        }
+        
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+    }
+    
+    class Coordinator: NSObject, UISearchBarDelegate, UISearchControllerDelegate, UISearchResultsUpdating {
+        fileprivate var base: _NavigationSearchBarConfigurator
+        fileprivate var searchBarCoordinator: SearchBar.Coordinator
+        fileprivate var searchController: SearchController!
+        
+        fileprivate weak var uiViewController: UIViewController? {
             didSet {
                 if uiViewController == nil || uiViewController != oldValue {
-                    oldValue?.searchController = nil
+                    if oldValue?.searchController != nil {
+                        oldValue?.searchController = nil
+                    }
                 }
                 
                 updateSearchController()
             }
         }
         
-        init(
+        fileprivate init(
             base: _NavigationSearchBarConfigurator,
             searchBarCoordinator: SearchBar.Coordinator
         ) {
@@ -67,7 +100,7 @@ extension _NavigationSearchBarConfigurator {
             updateSearchController()
         }
         
-        func initializeSearchController() {
+        private func initializeSearchController() {
             let searchResultsController: UIViewController?
             let searchResultsContent = base.searchResultsContent()
             
@@ -77,14 +110,17 @@ extension _NavigationSearchBarConfigurator {
                 searchResultsController = UIHostingController<SearchResultsContent>(rootView: base.searchResultsContent())
             }
             
-            searchController = UISearchController(searchResultsController: searchResultsController)
+            searchController = SearchController(
+                searchResultsController: searchResultsController,
+                customSearchBarType: base.searchBar.customAppKitOrUIKitClass
+            )
             searchController.definesPresentationContext = true
             searchController.obscuresBackgroundDuringPresentation = false
             searchController.searchBar.delegate = self
             searchController.searchResultsUpdater = self
         }
         
-        func updateSearchController() {
+        private func updateSearchController() {
             guard let uiViewController = uiViewController else {
                 return
             }
@@ -130,16 +166,12 @@ extension _NavigationSearchBarConfigurator {
         
         public func searchBarCancelButtonClicked(_ searchBar: UISearchBar) {
             searchBarCoordinator.searchBarCancelButtonClicked(searchBar)
-            
-            searchController.isActive = false
         }
         
         public func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
             searchBarCoordinator.searchBarSearchButtonClicked(searchBar)
-            
-            searchController.isActive = false
         }
-        
+
         // MARK: UISearchControllerDelegate
         
         func willPresentSearchController(_ searchController: UISearchController) {
@@ -181,17 +213,11 @@ extension _NavigationSearchBarConfigurator {
         override func willMove(toParent parent: UIViewController?) {
             super.willMove(toParent: parent)
             
-            coordinator?.uiViewController = navigationController?.topViewController
-        }
-        
-        override func didMove(toParent parent: UIViewController?) {
-            super.didMove(toParent: parent)
-            
-            coordinator?.uiViewController = navigationController?.topViewController
+            coordinator?.uiViewController = navigationController?.viewControllers.first
         }
         
         override func viewWillAppear(_ animated: Bool) {
-            coordinator?.uiViewController = navigationController?.topViewController
+            coordinator?.uiViewController = navigationController?.viewControllers.first
         }
     }
 }

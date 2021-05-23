@@ -8,31 +8,39 @@ import SwiftUI
 #if os(iOS) || os(tvOS) || os(macOS) || targetEnvironment(macCatalyst)
 
 open class CocoaHostingController<Content: View>: AppKitOrUIKitHostingController<CocoaHostingControllerContent<Content>>, CocoaController {
-    #if os(iOS) || targetEnvironment(macCatalyst)
-    override open var prefersStatusBarHidden: Bool {
-        return false
+    var _safeAreaInsetsAreFixed: Bool = false
+    var _namedViewDescriptions: [ViewName: _NamedViewDescription] = [:]
+    var _presentationCoordinator: CocoaPresentationCoordinator
+    #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
+    var _transitioningDelegate: UIViewControllerTransitioningDelegate? {
+        didSet {
+            transitioningDelegate = _transitioningDelegate
+        }
     }
     #endif
     
-    public let _presentationCoordinator: CocoaPresentationCoordinator
-    
-    override public var presentationCoordinator: CocoaPresentationCoordinator {
-        return _presentationCoordinator
+    public var mainView: Content {
+        get {
+            rootView.content
+        } set {
+            rootView.content = newValue
+        }
     }
     
-    var _namedViewDescriptions: [ViewName: _NamedViewDescription] = [:]
+    override public var presentationCoordinator: CocoaPresentationCoordinator {
+        _presentationCoordinator
+    }
     
-    init(
-        rootView: Content,
-        presentationCoordinator: CocoaPresentationCoordinator
+    public init(
+        mainView: Content,
+        presentationCoordinator: CocoaPresentationCoordinator = .init()
     ) {
         self._presentationCoordinator = presentationCoordinator
         
         super.init(
             rootView: .init(
                 parent: nil,
-                content: rootView,
-                presentationCoordinator: presentationCoordinator
+                content: mainView
             )
         )
         
@@ -40,27 +48,32 @@ open class CocoaHostingController<Content: View>: AppKitOrUIKitHostingController
         
         self.rootView.parent = self
         
-        if let rootView = rootView as? AnyPresentationView {
+        if let mainView = mainView as? AnyPresentationView {
             #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
             #if os(iOS) || targetEnvironment(macCatalyst)
-            hidesBottomBarWhenPushed = rootView.hidesBottomBarWhenPushed
+            hidesBottomBarWhenPushed = mainView.hidesBottomBarWhenPushed
             #endif
-            modalPresentationStyle = .init(rootView.presentationStyle)
-            transitioningDelegate = rootView.presentationStyle.transitioningDelegate
+            modalPresentationStyle = .init(mainView.modalPresentationStyle)
+            presentationController?.delegate = presentationCoordinator
+            _transitioningDelegate = mainView.modalPresentationStyle.toTransitioningDelegate()
             #elseif os(macOS)
             fatalError("unimplemented")
             #endif
         }
-        
-        _fixSafeAreaInsetsIfNecessary()
     }
     
+    @available(*, unavailable, renamed: "CocoaHostingController.init(mainView:)")
     public convenience init(rootView: Content) {
-        self.init(rootView: rootView, presentationCoordinator: .init())
+        self.init(mainView: rootView, presentationCoordinator: .init())
     }
     
-    public convenience init(@ViewBuilder rootView: () -> Content) {
-        self.init(rootView: rootView())
+    @_disfavoredOverload
+    public convenience init(mainView: Content) {
+        self.init(mainView: mainView, presentationCoordinator: .init())
+    }
+    
+    public convenience init(@ViewBuilder mainView: () -> Content) {
+        self.init(mainView: mainView())
     }
     
     @objc required public init?(coder aDecoder: NSCoder) {
@@ -83,6 +96,11 @@ open class CocoaHostingController<Content: View>: AppKitOrUIKitHostingController
             window.frame.size = sizeThatFits(in: Screen.main.bounds.size)
         }
     }
+    
+    override open func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+    }
+    
     #elseif os(macOS)
     override open func viewDidLayout() {
         super.viewDidLayout()
@@ -95,9 +113,21 @@ open class CocoaHostingController<Content: View>: AppKitOrUIKitHostingController
         _namedViewDescriptions[name]
     }
     
+    public func _setNamedViewDescription(_ description: _NamedViewDescription?, for name: ViewName) {
+        _namedViewDescriptions[name] = description
+    }
+    
     /// https://twitter.com/b3ll/status/1193747288302075906
-    func _fixSafeAreaInsetsIfNecessary() {
+    public func _fixSafeAreaInsetsIfNecessary() {
         #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
+        defer {
+            _safeAreaInsetsAreFixed = true
+        }
+        
+        guard !_safeAreaInsetsAreFixed else {
+            return
+        }
+        
         guard let viewClass = object_getClass(view) else {
             return
         }
@@ -131,8 +161,24 @@ open class CocoaHostingController<Content: View>: AppKitOrUIKitHostingController
                 objc_registerClassPair(subclass)
                 object_setClass(view, subclass)
             }
+            
+            view.setNeedsDisplay()
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
         }
         #endif
+    }
+}
+
+// MARK: - Auxiliary Implementation -
+
+final class _FixSafeAreaInsetsPreferenceKey: TakeLastPreferenceKey<Bool> {
+    
+}
+
+extension View {
+    public func _fixSafeAreaInsets() -> some View {
+        preference(key: _FixSafeAreaInsetsPreferenceKey.self, value: true)
     }
 }
 

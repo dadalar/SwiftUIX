@@ -10,125 +10,245 @@ import SwiftUI
 ///
 /// A revival of `PresentationLink` (from Xcode 11 beta 3).
 public struct PresentationLink<Destination: View, Label: View>: PresentationLinkView {
-    @usableFromInline
-    @Environment(\.environmentBuilder) var environmentBuilder
-    @usableFromInline
-    @Environment(\.managedObjectContext) var managedObjectContext
-    @usableFromInline
-    @Environment(\.modalPresentationStyle) var modalPresentationStyle
-    @usableFromInline
-    @Environment(\.presenter) var presenter
+    #if os(iOS) || os(macOS) || os(tvOS) || targetEnvironment(macCatalyst)
+    @Environment(\._appKitOrUIKitViewController) var _appKitOrUIKitViewController
+    @Environment(\.cocoaPresentationContext) var cocoaPresentationContext
+    #endif
     
-    @usableFromInline
+    @Environment(\.environmentBuilder) var environmentBuilder
+    @Environment(\.managedObjectContext) var managedObjectContext
+    @Environment(\.modalPresentationStyle) var _environment_modalPresentationStyle
+    @Environment(\.presenter) var presenter
+    @Environment(\.userInterfaceIdiom) var userInterfaceIdiom
+    
     let _destination: Destination
-    @usableFromInline
-    let onDismiss: (() -> ())?
-    @usableFromInline
     let _isPresented: Binding<Bool>?
-    @usableFromInline
+    let _onDismiss: () -> Void
+    
+    var _presentationStyle: ModalPresentationStyle?
+    
     let label: Label
     
-    @usableFromInline
-    @State var id = UUID()
-    @usableFromInline
+    @State var name = ViewName()
+    @State var id: AnyHashable = UUID()
     @State var _internal_isPresented: Bool = false
     
-    @usableFromInline
-    var destination: some View {
-        CocoaHostingView {
-            _destination
-                .managedObjectContext(managedObjectContext)
-                .mergeEnvironmentBuilder(environmentBuilder)
-                .modalPresentationStyle(modalPresentationStyle)
-        }
-    }
-    
-    @usableFromInline
     var isPresented: Binding<Bool> {
         _isPresented ?? $_internal_isPresented
     }
     
-    @inlinable
+    var presentation: AnyModalPresentation {
+        let content = AnyPresentationView(
+            _destination
+                .managedObjectContext(managedObjectContext)
+                .modifier(_ResolveAppKitOrUIKitViewController())
+        )
+        .modalPresentationStyle(_presentationStyle ?? _environment_modalPresentationStyle)
+        .preferredSourceViewName(name)
+        .mergeEnvironmentBuilder(environmentBuilder)
+        
+        return AnyModalPresentation(
+            id: id,
+            content: content,
+            onDismiss: _onDismiss,
+            reset: {
+                self.id = UUID()
+                self.isPresented.wrappedValue = false
+            }
+        )
+    }
+    
     public var body: some View {
-        Group {
-            if _isPresented == nil && presenter != nil {
-                Button(action: {
-                    self.presenter!.present(
-                        AnyModalPresentation(
-                            id: self.id,
-                            content: self.destination,
-                            presentationStyle: self.modalPresentationStyle,
-                            onDismiss: { self.onDismiss?() },
-                            resetBinding: { self.isPresented.wrappedValue = false }
-                        )
-                    )
-                }) {
-                    self.label
-                }
-            } else if modalPresentationStyle == .automatic {
-                Button(action: { self.isPresented.wrappedValue = true }, label: label).sheet(
-                    isPresented: isPresented,
-                    onDismiss: { self.onDismiss?() },
-                    content: { self.destination }
-                )
-            } else {
-                Button(
-                    action: { self.isPresented.wrappedValue = true },
-                    label: label
-                ).background(
-                    CocoaHostingView {
-                        _Presenter(
-                            id: id,
-                            destination: destination,
-                            isPresented: isPresented,
-                            onDismiss: onDismiss
-                        )
-                        .mergeEnvironmentBuilder(environmentBuilder)
-                        .modalPresentationStyle(modalPresentationStyle)
+        PassthroughView {
+            if let presenter = presenter,
+               userInterfaceIdiom != .mac,
+               presentation.style != .automatic
+            {
+                #if os(iOS) || targetEnvironment(macCatalyst)
+                if case .popover(_, _) = presentation.style {
+                    IntrinsicGeometryReader { proxy in
+                        if presenter is CocoaPresentationCoordinator {
+                            Button(
+                                action: togglePresentation,
+                                label: label
+                            )
+                            .preference(
+                                key: AnyModalPresentation.PreferenceKey.self,
+                                value: .init(
+                                    presentationID: id,
+                                    presentation: isPresented.wrappedValue ?
+                                        presentation.popoverAttachmentAnchorBounds(proxy.frame(in: .global))
+                                        : nil
+                                )
+                            )
+                            .modifier(_ResolveAppKitOrUIKitViewController())
+                        } else {
+                            Button(
+                                action: togglePresentation,
+                                label: label
+                            )
+                            .preference(
+                                key: AnyModalPresentation.PreferenceKey.self,
+                                value: .init(
+                                    presentationID: id,
+                                    presentation: isPresented.wrappedValue ?
+                                        presentation.popoverAttachmentAnchorBounds(proxy.frame(in: .global))
+                                        : nil
+                                )
+                            )
+                        }
                     }
+                } else {
+                    Button(action: { presenter.presentOnTop(presentation) }, label: label)
+                }
+                #else
+                Button(action: { presenter.present(presentation) }, label: label)
+                #endif
+            } else if presentation.style == .automatic {
+                _sheetPresentationButton
+            } else if
+                presentation.style == .popover,
+                userInterfaceIdiom == .pad || userInterfaceIdiom == .mac
+            {
+                #if os(iOS) || targetEnvironment(macCatalyst)
+                Button(action: { isPresented.wrappedValue.toggle() }, label: label)
+                    .popover(isPresented: isPresented.onChange { newValue in
+                        if !newValue {
+                            _onDismiss()
+                        }
+                    }) {
+                        presentation.content
+                    }
+                #else
+                _sheetPresentationButton
+                #endif
+            } else {
+                #if os(iOS) || os(macOS) || os(tvOS) || targetEnvironment(macCatalyst)
+                Button(
+                    action: togglePresentation,
+                    label: label
                 )
+                .preference(
+                    key: AnyModalPresentation.PreferenceKey.self,
+                    value: .init(
+                        presentationID: id,
+                        presentation: isPresented.wrappedValue ?
+                            presentation
+                            : nil
+                    )
+                )
+                .modifier(_ResolveAppKitOrUIKitViewController())
+                #else
+                _sheetPresentationButton
+                #endif
             }
         }
+        .name(name, id: id)
+    }
+    
+    private var _sheetPresentationButton: some View {
+        Button(
+            action: togglePresentation,
+            label: label
+        )
+        .sheet(
+            isPresented: isPresented,
+            onDismiss: _onDismiss,
+            content: { presentation.content }
+        )
+    }
+    
+    private func togglePresentation() {
+        isPresented.wrappedValue.toggle()
     }
 }
 
 // MARK: - API -
 
 extension PresentationLink {
-    @inline(never)
     public init(
         destination: Destination,
         onDismiss: (() -> ())?,
         @ViewBuilder label: () -> Label
     ) {
         self._destination = destination
-        self.onDismiss = onDismiss
+        self._onDismiss = onDismiss ?? { }
         self._isPresented = nil
+        
         self.label = label()
     }
     
-    @inline(never)
+    public init(
+        destination: Destination,
+        onDismiss: @escaping () -> () = { },
+        style: ModalPresentationStyle,
+        @ViewBuilder label: () -> Label
+    ) {
+        self._destination = destination
+        self._onDismiss = onDismiss
+        self._isPresented = nil
+        self._presentationStyle = style
+        
+        self.label = label()
+    }
+    
+    public init(
+        destination: Destination,
+        isPresented: Binding<Bool>,
+        onDismiss: @escaping () -> () = { },
+        style: ModalPresentationStyle,
+        @ViewBuilder label: () -> Label
+    ) {
+        self._destination = destination
+        self._onDismiss = onDismiss
+        self._isPresented = isPresented
+        self._presentationStyle = style
+        
+        self.label = label()
+    }
+    
     public init(
         destination: Destination,
         isPresented: Binding<Bool>,
         @ViewBuilder label: () -> Label
     ) {
         self._destination = destination
-        self.onDismiss = nil
+        self._onDismiss = { }
         self._isPresented = isPresented
+        
+        self.label = label()
+    }
+    
+    public init<V: Hashable>(
+        destination: Destination,
+        tag: V,
+        selection: Binding<V?>,
+        @ViewBuilder label: () -> Label
+    ) {
+        self._destination = destination
+        self._onDismiss = { }
+        self._isPresented = .init(
+            get: { selection.wrappedValue == tag },
+            set: { newValue in
+                if newValue {
+                    selection.wrappedValue = tag
+                } else {
+                    selection.wrappedValue = nil
+                }
+            }
+        )
+        
         self.label = label()
     }
 }
 
 extension View {
     /// Adds a destination to present when this view is pressed.
-    @inlinable
     public func onPress<Destination: View>(present destination: Destination) -> some View {
         modifier(_PresentOnPressViewModifier(destination: destination))
     }
     
     /// Adds a destination to present when this view is pressed.
-    @inlinable
     public func onPress<Destination: View>(
         present destination: Destination,
         isPresented: Binding<Bool>
@@ -144,20 +264,15 @@ extension View {
 
 // MARK: - Auxiliary Implementation -
 
-@usableFromInline
 struct _PresentOnPressViewModifier<Destination: View>: ViewModifier {
-    @usableFromInline
     @Environment(\.presenter) var presenter
     
-    @usableFromInline
     let destination: Destination
     
-    @usableFromInline
     init(destination: Destination) {
         self.destination = destination
     }
     
-    @usableFromInline
     func body(content: Content) -> some View {
         presenter.ifSome { presenter in
             Button(action: { presenter.present(self.destination) }) {
@@ -169,67 +284,6 @@ struct _PresentOnPressViewModifier<Destination: View>: ViewModifier {
                 label: { content.contentShape(Rectangle()) }
             )
             .buttonStyle(PlainButtonStyle())
-        }
-    }
-}
-
-extension PresentationLink {
-    @usableFromInline
-    struct _Presenter<Destination: View>: View {
-        @usableFromInline
-        @Environment(\.environmentBuilder) var environmentBuilder
-        @usableFromInline
-        @Environment(\.modalPresentationStyle) var modalPresentationStyle
-        
-        private let id: UUID
-        private let destination: Destination
-        private let isPresented: Binding<Bool>
-        private let onDismiss: (() -> ())?
-        
-        @usableFromInline
-        init(
-            id: UUID,
-            destination: Destination,
-            isPresented: Binding<Bool>,
-            onDismiss: (() -> ())?
-        ) {
-            self.id = id
-            self.destination = destination
-            self.isPresented = isPresented
-            self.onDismiss = onDismiss
-        }
-        
-        @usableFromInline
-        var presentation: AnyModalPresentation? {
-            guard isPresented.wrappedValue else {
-                return nil
-            }
-            
-            return AnyModalPresentation(
-                id: id,
-                content: destination,
-                presentationStyle: modalPresentationStyle,
-                onDismiss: { self.onDismiss?() },
-                resetBinding: { self.isPresented.wrappedValue = false }
-            )
-        }
-        
-        @usableFromInline
-        var body: some View {
-            Group {
-                if modalPresentationStyle == .automatic {
-                    ZeroSizeView().sheet(
-                        isPresented: isPresented,
-                        onDismiss: { self.onDismiss?() },
-                        content: { self.destination }
-                    )
-                } else {
-                    ZeroSizeView().preference(
-                        key: AnyModalPresentation.PreferenceKey.self,
-                        value: presentation
-                    )
-                }
-            }
         }
     }
 }

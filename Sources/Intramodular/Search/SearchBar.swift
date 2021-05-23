@@ -24,11 +24,14 @@ public struct SearchBar: DefaultTextInputType {
     private var placeholder: String?
     
     #if os(iOS) || targetEnvironment(macCatalyst)
+    private var uiFont: UIFont?
     private var searchBarStyle: UISearchBar.Style = .minimal
     #endif
     
-    private var showsCancelButton: Bool = false
+    private var showsCancelButton: Bool?
     private var onCancel: () -> Void = { }
+    
+    var customAppKitOrUIKitClass: AppKitOrUIKitSearchBar.Type?
     
     #if os(iOS) || targetEnvironment(macCatalyst)
     private var returnKeyType: UIReturnKeyType?
@@ -80,27 +83,51 @@ extension SearchBar: UIViewRepresentable {
     public func updateUIView(_ uiView: UIViewType, context: Context) {
         context.coordinator.base = self
         
-        uiView.placeholder = placeholder
+        _updateUISearchBar(uiView, environment: context.environment)
+    }
+    
+    func _updateUISearchBar(
+        _ uiView: UIViewType,
+        environment: EnvironmentValues
+    ) {
+        if let font = uiFont ?? environment.font?.toUIFont() {
+            uiView._retrieveTextField()?.font = font
+        }
+        
+        if let placeholder = placeholder {
+            uiView.placeholder = placeholder
+        }
+        
         uiView.searchBarStyle = searchBarStyle
         
         if uiView.text != text {
             uiView.text = text
         }
         
-        uiView.tintColor = context.environment.tintColor?.toUIColor()
+        uiView.tintColor = environment.tintColor?.toUIColor()
         
-        uiView.setShowsCancelButton(showsCancelButton, animated: true)
+        if let showsCancelButton = showsCancelButton {
+            if uiView.showsCancelButton != showsCancelButton {
+                uiView.setShowsCancelButton(showsCancelButton, animated: true)
+            }
+        }
         
         if let returnKeyType = returnKeyType {
             uiView.returnKeyType = returnKeyType
+        } else {
+            uiView.returnKeyType = .default
         }
         
         if let keyboardType = keyboardType {
             uiView.keyboardType = keyboardType
+        } else {
+            uiView.keyboardType = .default
         }
         
         if let enablesReturnKeyAutomatically = enablesReturnKeyAutomatically {
             uiView.enablesReturnKeyAutomatically = enablesReturnKeyAutomatically
+        } else {
+            uiView.enablesReturnKeyAutomatically = false
         }
     }
     
@@ -138,6 +165,12 @@ extension SearchBar: UIViewRepresentable {
     
     public func makeCoordinator() -> Coordinator {
         return Coordinator(base: self)
+    }
+}
+
+extension UISearchBar {
+    func _configurate(with searchBar: SearchBar) {
+        
     }
 }
 
@@ -214,6 +247,15 @@ extension SearchBar: NSViewRepresentable {
 @available(iOSApplicationExtension, unavailable)
 @available(tvOSApplicationExtension, unavailable)
 extension SearchBar {
+    public func customAppKitOrUIKitClass(_ cls: AppKitOrUIKitSearchBar.Type) -> Self {
+        then({ $0.customAppKitOrUIKitClass = cls })
+    }
+}
+
+@available(macCatalystApplicationExtension, unavailable)
+@available(iOSApplicationExtension, unavailable)
+@available(tvOSApplicationExtension, unavailable)
+extension SearchBar {
     #if os(iOS) || os(macOS) || targetEnvironment(macCatalyst)
     public func placeholder(_ placeholder: String) -> Self {
         then({ $0.placeholder = placeholder })
@@ -221,6 +263,10 @@ extension SearchBar {
     #endif
     
     #if os(iOS) || targetEnvironment(macCatalyst)
+    public func font(_ font: UIFont) -> Self {
+        then({ $0.uiFont = font })
+    }
+    
     public func searchBarStyle(_ searchBarStyle: UISearchBar.Style) -> Self {
         then({ $0.searchBarStyle = searchBarStyle })
     }
@@ -258,7 +304,6 @@ extension SearchBar {
 // MARK: - Auxiliary Implementation -
 
 #if os(iOS) || targetEnvironment(macCatalyst)
-
 extension UISearchBar {
     /// Retrieves the UITextField contained inside the UISearchBar.
     ///
@@ -267,7 +312,20 @@ extension UISearchBar {
         findSubview(ofKind: UITextField.self)
     }
 }
+#endif
 
 #endif
 
+// MARK: - Development Preview -
+
+#if os(iOS) || targetEnvironment(macCatalyst)
+@available(macCatalystApplicationExtension, unavailable)
+@available(iOSApplicationExtension, unavailable)
+@available(tvOSApplicationExtension, unavailable)
+struct SearchBar_Previews: PreviewProvider {
+    static var previews: some View {
+        SearchBar("Search...", text: .constant(""))
+            .searchBarStyle(.minimal)
+    }
+}
 #endif

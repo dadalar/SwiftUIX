@@ -5,45 +5,59 @@
 import Swift
 import SwiftUI
 
+public struct CocoaHostingView<Content: View> {
+    struct Configuration {
+        var edgesIgnoringSafeArea: Bool = false
+    }
+    
+    private var configuration: Configuration
+    private let mainView: Content
+    
+    public init(mainView: Content) {
+        self.configuration = .init()
+        self.mainView = mainView
+    }
+    
+    public init(@ViewBuilder mainView: () -> Content) {
+        self.init(mainView: mainView())
+    }
+}
+
+extension CocoaHostingView {
+    public func edgesIgnoringSafeArea() -> Self {
+        then({ $0.configuration.edgesIgnoringSafeArea = true })
+    }
+}
+
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
-public struct CocoaHostingView<Content: View>: UIViewControllerRepresentable {
-    public typealias UIViewControllerType = CocoaHostingController<Content>
+extension CocoaHostingView: AppKitOrUIKitViewControllerRepresentable {
+    public typealias AppKitOrUIKitViewControllerType = CocoaHostingController<Content>
     
-    private let rootView: Content
-    
-    public init(rootView: Content) {
-        self.rootView = rootView
+    public func makeAppKitOrUIKitViewController(context: Context) -> AppKitOrUIKitViewControllerType {
+        let viewController = AppKitOrUIKitViewControllerType(mainView: mainView)
+        
+        #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
+        viewController.view.backgroundColor = .clear
+        #endif
+        
+        if configuration.edgesIgnoringSafeArea {
+            viewController._fixSafeAreaInsetsIfNecessary()
+        }
+        
+        return viewController
     }
     
-    public init(@ViewBuilder rootView: () -> Content) {
-        self.rootView = rootView()
-    }
-    
-    public func makeUIViewController(context: Context) -> UIViewControllerType {
-        .init(rootView: rootView)
-    }
-    
-    public func updateUIViewController(_ uiViewController: UIViewControllerType, context: Context) {
-        uiViewController.rootView.content = rootView
+    public func updateAppKitOrUIKitViewController(_ viewController: AppKitOrUIKitViewControllerType, context: Context) {
+        viewController.mainView = mainView
     }
 }
 
 #else
 
-public struct CocoaHostingView<Content: View>: View {
-    private let rootView: Content
-    
-    public init(rootView: Content) {
-        self.rootView = rootView
-    }
-    
-    public init(@ViewBuilder rootView: () -> Content) {
-        self.rootView = rootView()
-    }
-    
+extension CocoaHostingView: View {
     public var body: some View {
-        rootView
+        mainView
     }
 }
 

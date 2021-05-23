@@ -9,8 +9,6 @@ import SwiftUI
 public class Screen: ObservableObject {
     public static let main = Screen()
     
-    private let notificationCenter = NotificationCenter.default
-    
     public var bounds: CGRect  {
         #if os(iOS) || os(tvOS)
         return UIScreen.main.bounds
@@ -31,11 +29,15 @@ public class Screen: ObservableObject {
         #endif
     }
     
+    public var orientation: DeviceOrientation {
+        .current
+    }
+    
     var orientationObserver: NSObjectProtocol?
     
     private init() {
         #if os(iOS)
-        orientationObserver = notificationCenter.addObserver(
+        orientationObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.orientationDidChangeNotification,
             object: nil,
             queue: .main,
@@ -47,19 +49,43 @@ public class Screen: ObservableObject {
     }
     
     deinit {
-        orientationObserver.map(notificationCenter.removeObserver(_:))
+        orientationObserver.map(NotificationCenter.default.removeObserver(_:))
     }
 }
 
 // MARK: - Extensions -
 
 extension Screen {
+    public var size: CGSize {
+        bounds.size
+    }
+    
     public var width: CGFloat {
         bounds.width
     }
     
     public var height: CGFloat {
         bounds.height
+    }
+    
+    public static var size: CGSize {
+        main.size
+    }
+    
+    public static var width: CGFloat {
+        main.width
+    }
+    
+    public static var height: CGFloat {
+        main.height
+    }
+    
+    public var widthMajorSize: CGSize {
+        if width >= height {
+            return .init(width: height, height: width)
+        } else {
+            return .init(width: width, height: height)
+        }
     }
 }
 

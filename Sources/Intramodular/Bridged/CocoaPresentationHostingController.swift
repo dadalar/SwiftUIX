@@ -23,7 +23,7 @@ open class CocoaPresentationHostingController: CocoaHostingController<AnyPresent
         self.presentation = presentation
         
         super.init(
-            rootView: presentation.content,
+            mainView: presentation.content,
             presentationCoordinator: coordinator
         )
         
@@ -31,42 +31,79 @@ open class CocoaPresentationHostingController: CocoaHostingController<AnyPresent
     }
     
     private func presentationDidChange(presentingViewController: UIViewController?) {
-        modalPresentationStyle = .init(presentation.content.presentationStyle)
+        mainView = presentation.content
+        
+        #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
+        #if os(iOS) || targetEnvironment(macCatalyst)
+        hidesBottomBarWhenPushed = mainView.hidesBottomBarWhenPushed
+        #endif
+        modalPresentationStyle = .init(mainView.modalPresentationStyle)
         presentationController?.delegate = presentationCoordinator
-        transitioningDelegate = presentation.content.presentationStyle.transitioningDelegate
+        _transitioningDelegate = mainView.modalPresentationStyle.toTransitioningDelegate()
+        #elseif os(macOS)
+        fatalError("unimplemented")
+        #endif
         
         #if !os(tvOS)
-        if case let .popover(permittedArrowDirections) = presentation.content.presentationStyle {
+        if case let .popover(permittedArrowDirections, attachmentAnchor) = mainView.modalPresentationStyle {
             popoverPresentationController?.delegate = presentationCoordinator
-            popoverPresentationController?.permittedArrowDirections = permittedArrowDirections
+            popoverPresentationController?.permittedArrowDirections = .init(permittedArrowDirections)
             
-            let sourceViewDescription = presentation.content.preferredSourceViewName.flatMap {
+            let sourceViewDescription = mainView.preferredSourceViewName.flatMap {
                 (presentingViewController as? _opaque_CocoaController)?._namedViewDescription(for: $0)
             }
             
             popoverPresentationController?.sourceView = presentingViewController?.view
             
-            if let sourceRect = sourceViewDescription?.globalBounds {
-                popoverPresentationController?.sourceRect = sourceRect
+            switch attachmentAnchor {
+                case .rect: do {
+                    if let sourceRect = mainView.popoverAttachmentAnchorBounds ?? sourceViewDescription?.globalBounds {
+                        guard let presentingViewController = presentingViewController, let coordinateSpace = presentingViewController.view.window?.coordinateSpace else {
+                            return
+                        }
+                        
+                        popoverPresentationController?.sourceRect = presentingViewController.view.convert(sourceRect, from: coordinateSpace)
+                    }
+                }
+                case .point(let point):
+                    popoverPresentationController?.sourceRect = .init(origin: .init(x: point.x, y: point.y), size: .init(width: 1, height: 1))
+                default:
+                    break
             }
         }
         #endif
         
-        if presentation.content.presentationStyle != .automatic {
+        if mainView.modalPresentationStyle != .automatic {
             view.backgroundColor = .clear
         }
-        
-        rootView.content = presentation.content
     }
     
     @objc required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    override open func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
+    override open func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
         
-        preferredContentSize = sizeThatFits(in: UIView.layoutFittingExpandedSize)
+        #if os(iOS) || targetEnvironment(macCatalyst)
+        if preferredContentSize == .zero {
+            invalidatePreferredContentSize()
+        }
+        #endif
+    }
+    
+    open override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        
+        view.frame.size = size
+    }
+    
+    open func invalidatePreferredContentSize() {
+        #if os(iOS) || targetEnvironment(macCatalyst)
+        if modalPresentationStyle == .popover {
+            preferredContentSize = sizeThatFits(.init(targetSize: nil))
+        }
+        #endif
     }
 }
 

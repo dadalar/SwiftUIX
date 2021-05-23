@@ -25,7 +25,7 @@ public struct PageControl {
     }
 }
 
-// MARK: - Protocol Conformances -
+// MARK: - Conformances -
 
 extension PageControl: UIViewRepresentable {
     public typealias UIViewType = UIPageControl
@@ -63,7 +63,7 @@ extension PageControl: UIViewRepresentable {
         context.coordinator.base = self
         
         uiView.currentPage = currentPage.wrappedValue
-        uiView.currentPageIndicatorTintColor = context.environment.currentPageIndicatorTintColor?.toUIColor3()
+        uiView.currentPageIndicatorTintColor = context.environment.currentPageIndicatorTintColor?.toUIColor()
         uiView.numberOfPages = numberOfPages
         uiView.pageIndicatorTintColor = context.environment.pageIndicatorTintColor?.toUIColor()
         

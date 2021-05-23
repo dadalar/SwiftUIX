@@ -50,6 +50,14 @@ extension CocoaScrollView {
         then({ $0.configuration.alwaysBounceHorizontal = alwaysBounceHorizontal })
     }
     
+    /// Adds a condition whether for whether the collection view disables bouncing when scrolling reaches the end of the content
+    public func scrollBounceDisabled(_ disabled: Bool) -> Self {
+        then {
+            $0.configuration.alwaysBounceHorizontal = !disabled
+            $0.configuration.alwaysBounceVertical = !disabled
+        }
+    }
+    
     public func isPagingEnabled(_ enabled: Bool) -> Self {
         then({ $0.configuration.isPagingEnabled = enabled })
     }
@@ -62,34 +70,20 @@ extension CocoaScrollView {
         then({ $0.configuration.contentOffset = contentOffset })
     }
     
-    public func contentInset(_ contentInset: UIEdgeInsets) -> Self {
+    public func contentInsets(_ contentInset: EdgeInsets) -> Self {
         then({ $0.configuration.contentInset = contentInset })
     }
     
-    public func contentInset(_ contentInset: EdgeInsets) -> Self {
-        self.contentInset(.init(
-            top: contentInset.top,
-            left: contentInset.leading,
-            bottom: contentInset.bottom,
-            right: contentInset.trailing
-        ))
+    @_disfavoredOverload
+    public func contentInsets(_ insets: UIEdgeInsets) -> Self {
+        contentInsets(EdgeInsets(insets))
     }
     
-    public func contentInset(_ edges: Edge.Set = .all, _ length: CGFloat = 0) -> Self {
-        var contentInset = self.configuration.contentInset
-        if edges.contains(.top) {
-            contentInset.top += length
-        }
-        if edges.contains(.leading) {
-            contentInset.left += length
-        }
-        if edges.contains(.bottom) {
-            contentInset.bottom += length
-        }
-        if edges.contains(.trailing) {
-            contentInset.right += length
-        }
-        return self.contentInset(contentInset)
+    public func contentInsets(
+        _ edges: Edge.Set = .all,
+        _ length: CGFloat = 0
+    ) -> Self {
+        contentInsets(EdgeInsets(edges, length))
     }
 }
 
@@ -102,7 +96,7 @@ extension CocoaScrollView {
     public func isRefreshing(_ isRefreshing: Bool) -> Self {
         then({ $0.configuration.isRefreshing = isRefreshing })
     }
-
+    
     public func refreshControlTintColor(_ color: UIColor?) -> Self {
         then({ $0.configuration.refreshControlTintColor = color })
     }

@@ -7,12 +7,26 @@ import SwiftUI
 
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
-public class UIHostingTableViewCell<ItemType: Identifiable, Content: View> : UITableViewCell {
+public class UIHostingTableViewCell<ItemType: Identifiable, Content: View>: UITableViewCell {
+    struct State: Hashable {
+        let isFocused: Bool
+        let isHighlighted: Bool
+        let isSelected: Bool
+    }
+    
     var tableViewController: UITableViewController!
     var indexPath: IndexPath?
     
     var item: ItemType!
     var makeContent: ((ItemType) -> Content)!
+    
+    var state: State {
+        .init(
+            isFocused: isFocused,
+            isHighlighted: isHighlighted,
+            isSelected: isSelected
+        )
+    }
     
     var contentHostingController: UIHostingController<RootView>!
     
@@ -56,7 +70,7 @@ extension UIHostingTableViewCell {
             layoutMargins = .zero
             selectedBackgroundView = .init()
             
-            contentHostingController = UIHostingController(rootView: RootView(uiTableViewCell: self))
+            contentHostingController = UIHostingController(rootView: RootView(base: self))
             contentHostingController.view.backgroundColor = .clear
             contentHostingController.view.translatesAutoresizingMaskIntoConstraints = false
             
@@ -72,7 +86,7 @@ extension UIHostingTableViewCell {
                 contentHostingController.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
             ])
         } else {
-            contentHostingController.rootView = RootView(uiTableViewCell: self)
+            contentHostingController.rootView = RootView(base: self)
             contentHostingController.view.invalidateIntrinsicContentSize()
         }
     }
@@ -91,38 +105,47 @@ extension UIHostingTableViewCell {
 
 extension UIHostingTableViewCell {
     struct RootView: View {
-        private struct _ListRowManager: ListRowManager {
-            var isHighlighted: Bool {
-                false // FIXME!!!
+        private struct _CellProxyBase: SwiftUIX._CellProxyBase {
+            weak var base: UIHostingTableViewCell<ItemType, Content>?
+            
+            var globalFrame: CGRect {
+                guard let base = base, let parentViewController = base._parentViewController, let coordinateSpace = parentViewController.view.window?.coordinateSpace else {
+                    return .zero
+                }
+                
+                return parentViewController.view.convert(base.frame, to: coordinateSpace)
             }
             
-            weak var uiTableViewCell: UIHostingTableViewCell<ItemType, Content>?
+            func invalidateLayout() {
+                fatalError("unimplemented")
+            }
             
-            func _animate(_ action: () -> ()) {
-                uiTableViewCell?.tableViewController.tableView.beginUpdates()
+            func performWithAnimation(_ action: () -> ()) {
+                base?.tableViewController.tableView.beginUpdates()
                 action()
-                uiTableViewCell?.tableViewController.tableView.endUpdates()
-            }
-            
-            func _reload() {
-                uiTableViewCell?.reload(with: .none)
+                base?.tableViewController.tableView.endUpdates()
             }
         }
         
-        private let item: ItemType
-        private let makeContent: (ItemType) -> Content
-        private let listRowManager: _ListRowManager
+        private let _cellProxyBase: _CellProxyBase
+        private let id: AnyHashable
+        private let content: Content
+        private let state: State
         
-        init(uiTableViewCell: UIHostingTableViewCell<ItemType, Content>) {
-            self.item = uiTableViewCell.item
-            self.makeContent = uiTableViewCell.makeContent
-            self.listRowManager = .init(uiTableViewCell: uiTableViewCell)
+        init(base: UIHostingTableViewCell<ItemType, Content>) {
+            self._cellProxyBase = .init(base: base)
+            self.id = base.item.id
+            self.content = base.makeContent(base.item)
+            self.state = base.state
         }
         
         var body: some View {
-            makeContent(item)
-                .environment(\.listRowManager, listRowManager)
-                .id(item.id)
+            content
+                .environment(\._cellProxy, .init(base: _cellProxyBase))
+                .environment(\.isCellFocused, state.isFocused)
+                .environment(\.isCellHighlighted, state.isHighlighted)
+                .environment(\.isCellSelected, state.isSelected)
+                .id(id)
         }
     }
 }

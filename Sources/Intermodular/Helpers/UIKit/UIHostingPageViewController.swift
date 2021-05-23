@@ -8,13 +8,17 @@ import Swift
 import SwiftUI
 import UIKit
 
-public class UIHostingPageViewController<Page: View>: UIPageViewController {
+protocol _opaque_UIHostingPageViewController: NSObject {
+    
+}
+
+public class UIHostingPageViewController<Page: View>: UIPageViewController, _opaque_UIHostingPageViewController {
     struct PageContainer: View {
         let index: AnyIndex
         var page: Page
         
         var body: some View {
-            page
+            page.modifier(_ResolveAppKitOrUIKitViewController())
         }
     }
     
@@ -61,8 +65,6 @@ public class UIHostingPageViewController<Page: View>: UIPageViewController {
     }
     
     var cyclesPages: Bool = false
-    
-    var isInitialPageIndexApplied: Bool = false
     
     var currentPageIndex: AnyIndex? {
         get {

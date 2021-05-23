@@ -12,21 +12,26 @@ public struct CocoaHostingControllerContent<Content: View>: View  {
     
     public var content: Content
     
-    var presentationCoordinator: CocoaPresentationCoordinator?
-    
-    init(
-        parent: CocoaController?,
-        content: Content,
-        presentationCoordinator: CocoaPresentationCoordinator?
-    ) {
+    init(parent: CocoaController?, content: Content) {
         self.content = content
-        self.presentationCoordinator = presentationCoordinator
     }
     
     public var body: some View {
         content
-            .modifier(_SetAppKitOrUIKitViewControllerEnvironmentValue(_appKitOrUIKitViewController: parent))
-            .modifier(_UseCocoaPresentationCoordinator(coordinator: presentationCoordinator))
+            .modifier(_ResolveAppKitOrUIKitViewController(_appKitOrUIKitViewControllerBox: .init(parent)))
+            .onPreferenceChange(_FixSafeAreaInsetsPreferenceKey.self) {
+                if ($0 ?? false) {
+                    parent?._fixSafeAreaInsetsIfNecessary()
+                }
+            }
+            .preference(key: _FixSafeAreaInsetsPreferenceKey.self, value: nil)
+    }
+}
+
+extension CocoaHostingControllerContent: _opaque_FrameModifiedContent where Content: _opaque_FrameModifiedContent {
+    @usableFromInline
+    var _opaque_frameModifier: _opaque_FrameModifier {
+        content._opaque_frameModifier
     }
 }
 

@@ -8,18 +8,30 @@ import SwiftUI
 #if os(iOS) || os(macOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
 public struct CocoaPresentationMode: PresentationManager {
-    var coordinator: CocoaPresentationCoordinator?
+    var presentationCoordinatorBox: ObservableWeakReferenceBox<CocoaPresentationCoordinator>
+    
+    private var coordinator: CocoaPresentationCoordinator? {
+        presentationCoordinatorBox.value
+    }
     
     public var isPresented: Bool {
         coordinator != nil
     }
     
-    init(coordinator: CocoaPresentationCoordinator? = nil) {
-        self.coordinator = coordinator
+    init(coordinator: ObservableWeakReferenceBox<CocoaPresentationCoordinator>) {
+        self.presentationCoordinatorBox = coordinator
+    }
+    
+    init(coordinator: CocoaPresentationCoordinator) {
+        self.presentationCoordinatorBox = .init(coordinator)
     }
     
     public func dismiss() {
-        coordinator?.dismissSelf()
+        guard let coordinator = coordinator else {
+            return assertionFailure()
+        }
+        
+        coordinator.dismissSelf()
     }
 }
 

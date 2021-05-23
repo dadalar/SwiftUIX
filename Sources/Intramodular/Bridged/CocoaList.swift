@@ -8,22 +8,22 @@ import SwiftUI
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
 public struct CocoaList<
-    SectionModel: Identifiable,
+    SectionType: Identifiable,
     ItemType: Identifiable,
     Data: RandomAccessCollection,
     SectionHeader: View,
     SectionFooter: View,
     RowContent: View
->: UIViewControllerRepresentable where Data.Element == ListSection<SectionModel, ItemType> {
+>: UIViewControllerRepresentable where Data.Element == ListSection<SectionType, ItemType> {
     public typealias Offset = ScrollView<AnyView>.ContentOffset
-    public typealias UIViewControllerType = UIHostingTableViewController<SectionModel, ItemType, Data, SectionHeader, SectionFooter, RowContent>
+    public typealias UIViewControllerType = UIHostingTableViewController<SectionType, ItemType, Data, SectionHeader, SectionFooter, RowContent>
     
     @usableFromInline
     let data: Data
     @usableFromInline
-    let sectionHeader: (SectionModel) -> SectionHeader
+    let sectionHeader: (SectionType) -> SectionHeader
     @usableFromInline
-    let sectionFooter: (SectionModel) -> SectionFooter
+    let sectionFooter: (SectionType) -> SectionFooter
     @usableFromInline
     let rowContent: (ItemType) -> RowContent
     
@@ -45,8 +45,8 @@ public struct CocoaList<
     
     public init(
         _ data: Data,
-        sectionHeader: @escaping (SectionModel) -> SectionHeader,
-        sectionFooter: @escaping (SectionModel) -> SectionFooter,
+        sectionHeader: @escaping (SectionType) -> SectionHeader,
+        sectionFooter: @escaping (SectionType) -> SectionFooter,
         rowContent: @escaping (ItemType) -> RowContent
     ) {
         self.data = data
@@ -89,8 +89,8 @@ public struct CocoaList<
 extension CocoaList {
     public init<_Item: Hashable>(
         _ data: Data,
-        sectionHeader: @escaping (SectionModel) -> SectionHeader,
-        sectionFooter: @escaping (SectionModel) -> SectionFooter,
+        sectionHeader: @escaping (SectionType) -> SectionHeader,
+        sectionFooter: @escaping (SectionType) -> SectionFooter,
         rowContent: @escaping (_Item) -> RowContent
     ) where ItemType == HashIdentifiableValue<_Item> {
         self.data = data
@@ -99,39 +99,67 @@ extension CocoaList {
         self.rowContent = { rowContent($0.value) }
     }
     
-    public init<_SectionModel: Hashable, _Item: Hashable>(
+    public init<_SectionType: Hashable, _Item: Hashable>(
         _ data: Data,
-        sectionHeader: @escaping (_SectionModel) -> SectionHeader,
-        sectionFooter: @escaping (_SectionModel) -> SectionFooter,
+        sectionHeader: @escaping (_SectionType) -> SectionHeader,
+        sectionFooter: @escaping (_SectionType) -> SectionFooter,
         rowContent: @escaping (_Item) -> RowContent
-    ) where SectionModel == HashIdentifiableValue<_SectionModel>, ItemType == HashIdentifiableValue<_Item> {
+    ) where SectionType == HashIdentifiableValue<_SectionType>, ItemType == HashIdentifiableValue<_Item> {
         self.data = data
         self.sectionHeader = { sectionHeader($0.value) }
         self.sectionFooter = { sectionFooter($0.value) }
         self.rowContent = { rowContent($0.value) }
     }
     
-    public init<_SectionModel: Hashable, _Item: Hashable>(
-        _ data: [ListSection<_SectionModel, _Item>],
-        sectionHeader: @escaping (_SectionModel) -> SectionHeader,
-        sectionFooter: @escaping (_SectionModel) -> SectionFooter,
+    public init<_SectionType: Hashable, _Item: Hashable>(
+        _ data: [ListSection<_SectionType, _Item>],
+        sectionHeader: @escaping (_SectionType) -> SectionHeader,
+        sectionFooter: @escaping (_SectionType) -> SectionFooter,
         rowContent: @escaping (_Item) -> RowContent
-    ) where Data == Array<ListSection<SectionModel, ItemType>>, SectionModel == HashIdentifiableValue<_SectionModel>, ItemType == HashIdentifiableValue<_Item> {
-        self.data = data.map({ .init(model: .init($0.model), data: $0.data.map(HashIdentifiableValue.init)) })
+    ) where Data == Array<ListSection<SectionType, ItemType>>, SectionType == HashIdentifiableValue<_SectionType>, ItemType == HashIdentifiableValue<_Item> {
+        self.data = data.map({ .init(model: .init($0.model), items: $0.items.map(HashIdentifiableValue.init)) })
         self.sectionHeader = { sectionHeader($0.value) }
         self.sectionFooter = { sectionFooter($0.value) }
         self.rowContent = { rowContent($0.value) }
     }
 }
 
-extension CocoaList where Data: RangeReplaceableCollection, SectionModel == KeyPathHashIdentifiableValue<Int, Int>, SectionHeader == Never, SectionFooter == Never {
+extension CocoaList where
+    SectionType == KeyPathHashIdentifiableValue<Int, Int>,
+    SectionHeader == Never,
+    SectionFooter == Never
+{
+    public init<
+        _ItemType,
+        _ItemID,
+        Items: RandomAccessCollection
+    >(
+        _ items: Items,
+        id: KeyPath<_ItemType, _ItemID>,
+        @ViewBuilder rowContent: @escaping (_ItemType) -> RowContent
+    ) where Data == AnyRandomAccessCollection<ListSection<SectionType, ItemType>>, Items.Element == _ItemType, ItemType == KeyPathHashIdentifiableValue<_ItemType, _ItemID> {
+        self.init(
+            AnyRandomAccessCollection([ListSection(KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: items.elements(identifiedBy: id))]),
+            sectionHeader: Never.produce,
+            sectionFooter: Never.produce,
+            rowContent: { rowContent($0.value) }
+        )
+    }
+}
+
+extension CocoaList where
+    Data: RangeReplaceableCollection,
+    SectionType == KeyPathHashIdentifiableValue<Int, Int>,
+    SectionHeader == Never,
+    SectionFooter == Never
+{
     public init<Items: RandomAccessCollection>(
         _ items: Items,
         @ViewBuilder rowContent: @escaping (ItemType) -> RowContent
     ) where Items.Element == ItemType {
         var data = Data.init()
         
-        data.append(.init(model: KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: items))
+        data.append(.init(KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: items))
         
         self.init(
             data,
@@ -143,12 +171,12 @@ extension CocoaList where Data: RangeReplaceableCollection, SectionModel == KeyP
     
     public init<Items: RandomAccessCollection>(
         @ViewBuilder content: @escaping () -> ForEach<Items, ItemType.ID, RowContent>
-    ) where Items.Element == ItemType, Data == Array<ListSection<SectionModel, ItemType>> {
+    ) where Items.Element == ItemType, Data == Array<ListSection<SectionType, ItemType>> {
         var data = Data.init()
         
         let content = content()
         
-        data.append(.init(model: KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: content.data))
+        data.append(.init(KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: content.data))
         
         self.init(
             data,
@@ -159,13 +187,18 @@ extension CocoaList where Data: RangeReplaceableCollection, SectionModel == KeyP
     }
 }
 
-extension CocoaList where Data == Array<ListSection<SectionModel, ItemType>>, SectionModel == KeyPathHashIdentifiableValue<Int, Int>, SectionHeader == Never, SectionFooter == Never {
+extension CocoaList where
+    Data == Array<ListSection<SectionType, ItemType>>,
+    SectionType == KeyPathHashIdentifiableValue<Int, Int>,
+    SectionHeader == Never,
+    SectionFooter == Never
+{
     public init<Items: RandomAccessCollection>(
         _ items: Items,
         @ViewBuilder rowContent: @escaping (ItemType) -> RowContent
     ) where Items.Element == ItemType {
         self.init(
-            [.init(model: KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: items)],
+            [.init(KeyPathHashIdentifiableValue(value: 0, keyPath: \.self), items: items)],
             sectionHeader: Never.produce,
             sectionFooter: Never.produce,
             rowContent: rowContent
@@ -212,58 +245,34 @@ extension CocoaList {
     public func alwaysBounceVertical(_ alwaysBounceVertical: Bool) -> Self {
         then({ $0.scrollViewConfiguration.alwaysBounceVertical = alwaysBounceVertical })
     }
-
+    
     @inlinable
     public func alwaysBounceHorizontal(_ alwaysBounceHorizontal: Bool) -> Self {
         then({ $0.scrollViewConfiguration.alwaysBounceHorizontal = alwaysBounceHorizontal })
     }
-
+    
     @inlinable
     public func onOffsetChange(_ body: @escaping (Offset) -> ()) -> Self {
         then({ $0.scrollViewConfiguration.onOffsetChange = body })
     }
     
     @inlinable
-    public func contentInset(_ contentInset: UIEdgeInsets) -> Self {
+    public func contentInsets(_ contentInset: EdgeInsets) -> Self {
         then({ $0.scrollViewConfiguration.contentInset = contentInset })
     }
     
+    @_disfavoredOverload
     @inlinable
-    public func contentInset(_ insets: EdgeInsets) -> Self {
-        contentInset(
-            .init(
-                top: insets.top,
-                left: insets.leading,
-                bottom: insets.bottom,
-                right: insets.trailing
-            )
-        )
+    public func contentInsets(_ insets: UIEdgeInsets) -> Self {
+        contentInsets(EdgeInsets(insets))
     }
     
     @inlinable
-    public func contentInset(
+    public func contentInsets(
         _ edges: Edge.Set = .all,
         _ length: CGFloat = 0
     ) -> Self {
-        var insets = self.scrollViewConfiguration.contentInset
-        
-        if edges.contains(.top) {
-            insets.top += length
-        }
-        
-        if edges.contains(.leading) {
-            insets.left += length
-        }
-        
-        if edges.contains(.bottom) {
-            insets.bottom += length
-        }
-        
-        if edges.contains(.trailing) {
-            insets.right += length
-        }
-        
-        return self.contentInset(insets)
+        contentInsets(EdgeInsets(edges, length))
     }
     
     @inlinable

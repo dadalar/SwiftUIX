@@ -75,7 +75,7 @@ extension CGRect {
 }
 
 extension CGRect {
-    public func inflate(by factor: CGFloat) -> CGRect {
+    func inflate(by factor: CGFloat) -> CGRect {
         let x = origin.x
         let y = origin.y
         let w = width
@@ -87,5 +87,14 @@ extension CGRect {
         let newY = y + ((h - newH) / 2)
         
         return .init(x: newX, y: newY, width: newW, height: newH)
+    }
+    
+    func rounded(_ rule: FloatingPointRoundingRule) -> CGRect {
+        .init(
+            x: minX.rounded(rule),
+            y: minY.rounded(rule),
+            width: width.rounded(rule),
+            height: height.rounded(rule)
+        )
     }
 }

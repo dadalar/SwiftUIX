@@ -32,6 +32,20 @@ extension PerformActionView {
     }
 }
 
+public struct WithDynamicAction<Action: DynamicAction, Content: View>: View {
+    public let action: Action
+    public let content: (Action) -> Content
+    
+    public init(_ action: Action, _ content: @escaping (Action) -> Content) {
+        self.action = action
+        self.content = content
+    }
+    
+    public var body: some View {
+        content(action)
+    }
+}
+
 public struct DynamicActionButton<Action: DynamicAction, Label: View>: View {
     public let action: Action
     public let label: Label
@@ -57,6 +71,10 @@ extension View {
             self
         }
         .buttonStyle(PlainButtonStyle())
+    }
+    
+    public func onPress(perform action: @escaping () -> Void) -> some View {
+        onPress(perform: Action(action))
     }
 }
 
@@ -103,6 +121,6 @@ public struct AddDynamicAction<Base: PerformActionView, Action: DynamicAction>: 
     
     @inlinable
     public var body: some View {
-        base.addAction(perform: action.perform)
+        base.addAction(action)
     }
 }

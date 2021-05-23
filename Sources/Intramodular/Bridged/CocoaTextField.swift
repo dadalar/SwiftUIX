@@ -9,16 +9,22 @@ import SwiftUI
 
 /// A control that displays an editable text interface.
 public struct CocoaTextField<Label: View>: CocoaView {
-    public struct CharactersChange {
+    typealias Rect = ((_ bounds: CGRect, _ original: CGRect) -> CGRect)
+    
+    public struct CharactersChange: Hashable {
         public let range: NSRange
         public let replacement: String
     }
     
     struct _Configuration {
-        var onEditingChanged: (Bool) -> Void
+        var onEditingChanged: (Bool) -> Void = { _ in }
         var onCommit: () -> Void
         var onDeleteBackward: () -> Void = { }
         var onCharactersChange: (CharactersChange) -> Bool = { _ in true }
+        
+        var textRect: Rect?
+        var editingRect: Rect?
+        var clearButtonRect: Rect?
         
         var isInitialFirstResponder: Bool?
         var isFirstResponder: Bool?
@@ -27,15 +33,27 @@ public struct CocoaTextField<Label: View>: CocoaView {
         
         var autocapitalization: UITextAutocapitalizationType?
         var borderStyle: UITextField.BorderStyle = .none
+        var clearButtonMode: UITextField.ViewMode?
         var uiFont: UIFont?
-        var inputAccessoryView: AnyView?
         var inputView: AnyView?
         var kerning: CGFloat?
-        var keyboardType: UIKeyboardType = .default
         var placeholder: String?
-        var returnKeyType: UIReturnKeyType?
+        var smartDashesType: UITextSmartDashesType?
+        var smartQuotesType: UITextSmartQuotesType?
+        var secureTextEntry: Bool?
         var textColor: UIColor?
         var textContentType: UITextContentType?
+        
+        // MARK: Input Accessory
+        
+        var inputAccessoryView: AnyView?
+        
+        // MARK: Keyboard
+        
+        var dismissKeyboardOnReturn: Bool = true
+        var enablesReturnKeyAutomatically: Bool?
+        var keyboardType: UIKeyboardType = .default
+        var returnKeyType: UIReturnKeyType?
     }
     
     @Environment(\.font) var font
@@ -50,6 +68,7 @@ public struct CocoaTextField<Label: View>: CocoaView {
     
     private var label: Label
     private var text: Binding<String>
+    private var isEditing: Binding<Bool>
     private var configuration: _Configuration
     
     public var body: some View {
@@ -61,33 +80,37 @@ public struct CocoaTextField<Label: View>: CocoaView {
                     .animation(nil)
             }
             
-            _CocoaTextField<Label>(text: text, configuration: configuration)
+            _CocoaTextField<Label>(text: text, isEditing: isEditing, configuration: configuration)
         }
     }
 }
 
-struct _CocoaTextField<Label: View>: UIViewRepresentable {
+fileprivate struct _CocoaTextField<Label: View>: UIViewRepresentable {
     typealias Configuration = CocoaTextField<Label>._Configuration
-    typealias UIViewType = UIHostingTextField
+    typealias UIViewType = _UITextField
     
     let text: Binding<String>
+    let isEditing: Binding<Bool>
     let configuration: Configuration
     
     class Coordinator: NSObject, UITextFieldDelegate {
         var text: Binding<String>
+        var isEditing: Binding<Bool>
         var configuration: Configuration
         
-        init(text: Binding<String>, configuration: Configuration) {
+        init(text: Binding<String>, isEditing: Binding<Bool>, configuration: Configuration) {
             self.text = text
+            self.isEditing = isEditing
             self.configuration = configuration
         }
         
         func textFieldDidBeginEditing(_ textField: UITextField) {
+            isEditing.wrappedValue = true
             configuration.onEditingChanged(true)
         }
         
         func textFieldDidChangeSelection(_ textField: UITextField) {
-            guard textField.markedTextRange == nil else {
+            guard textField.markedTextRange == nil, text.wrappedValue != textField.text else {
                 return
             }
             
@@ -95,8 +118,8 @@ struct _CocoaTextField<Label: View>: UIViewRepresentable {
         }
         
         func textFieldDidEndEditing(_ textField: UITextField, reason: UITextField.DidEndEditingReason) {
+            isEditing.wrappedValue = false
             configuration.onEditingChanged(false)
-            configuration.onCommit()
         }
         
         func textField(
@@ -108,14 +131,21 @@ struct _CocoaTextField<Label: View>: UIViewRepresentable {
         }
         
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-            textField.resignFirstResponder()
+            if configuration.dismissKeyboardOnReturn {
+                textField.resignFirstResponder()
+            }
+            
+            configuration.onCommit()
             
             return true
         }
     }
     
     func makeUIView(context: Context) -> UIViewType {
-        let uiView = UIHostingTextField()
+        let uiView = _UITextField()
+        
+        uiView.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        uiView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         
         uiView.delegate = context.coordinator
         
@@ -132,90 +162,76 @@ struct _CocoaTextField<Label: View>: UIViewRepresentable {
         context.coordinator.text = text
         context.coordinator.configuration = configuration
         
-        #if targetEnvironment(macCatalyst)
-        // uiView._focusRingType = configuration.focusRingType
-        #endif
-        
         uiView.onDeleteBackward = configuration.onDeleteBackward
+        uiView.textRect = configuration.textRect
+        uiView.editingRect = configuration.editingRect
+        uiView.clearButtonRect = configuration.clearButtonRect
         
-        uiView.setContentHuggingPriority(.defaultHigh, for: .vertical)
-        
-        if let autocapitalization = configuration.autocapitalization {
-            uiView.autocapitalizationType = autocapitalization
-        } else {
-            uiView.autocapitalizationType = .sentences
-        }
-        
-        uiView.borderStyle = configuration.borderStyle
-        
-        if let disableAutocorrection = context.environment.disableAutocorrection {
-            uiView.autocorrectionType = disableAutocorrection ? .no : .yes
-        } else {
-            uiView.autocorrectionType = .default
-        }
-        
-        uiView.font = configuration.uiFont ?? context.environment.font?.toUIFont()
-        
-        if let kerning = configuration.kerning {
-            uiView.defaultTextAttributes.updateValue(kerning, forKey: .kern)
-        }
-        
-        if let inputAccessoryView = configuration.inputAccessoryView {
-            if let _inputAccessoryView = uiView.inputAccessoryView as? UIHostingView<AnyView> {
-                _inputAccessoryView.rootView = inputAccessoryView
-            } else {
-                uiView.inputAccessoryView = UIHostingView(rootView: inputAccessoryView)
-                uiView.inputAccessoryView?.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        setConfiguration: do {
+            uiView.autocapitalizationType = configuration.autocapitalization ?? .sentences
+            uiView.autocorrectionType = context.environment.disableAutocorrection.map({ $0 ? .no : .yes }) ?? .default
+            uiView.borderStyle = configuration.borderStyle
+            uiView.clearButtonMode = configuration.clearButtonMode ?? .never
+            uiView.enablesReturnKeyAutomatically = configuration.enablesReturnKeyAutomatically ?? false
+            uiView.font = configuration.uiFont ?? context.environment.font?.toUIFont() ?? uiView.font
+            uiView.isSecureTextEntry = configuration.secureTextEntry ?? false
+            uiView.isUserInteractionEnabled = context.environment.isEnabled
+            uiView.keyboardType = configuration.keyboardType
+            uiView.returnKeyType = configuration.returnKeyType ?? .default
+            uiView.smartDashesType = configuration.smartDashesType ?? .default
+            uiView.smartQuotesType = configuration.smartQuotesType ?? .default
+            uiView.textAlignment = .init(context.environment.multilineTextAlignment)
+            uiView.textColor = configuration.textColor ?? uiView.textColor
+            uiView.textContentType = configuration.textContentType
+            
+            if let kerning = configuration.kerning {
+                uiView.defaultTextAttributes.updateValue(kerning, forKey: .kern)
             }
-        } else {
-            uiView.inputAccessoryView = nil
         }
         
-        if let inputView = configuration.inputView {
-            if let _inputView = uiView.inputView as? UIHostingView<AnyView> {
-                _inputView.rootView = inputView
+        setData: do {
+            uiView.text = text.wrappedValue
+            
+            if let placeholder = configuration.placeholder {
+                uiView.attributedPlaceholder = NSAttributedString(
+                    string: placeholder,
+                    attributes: [
+                        .font: configuration.uiFont ?? context.environment.font?.toUIFont() ?? uiView.font,
+                        .paragraphStyle: NSMutableParagraphStyle().then {
+                            $0.alignment = .init(context.environment.multilineTextAlignment)
+                        }
+                    ]
+                    .compactMapValues({ $0 })
+                )
             } else {
-                uiView.inputView = UIHostingView(rootView: inputView)
-                uiView.inputView?.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                uiView.attributedPlaceholder = nil
+                uiView.placeholder = nil
             }
-        } else {
-            uiView.inputView = nil
         }
         
-        uiView.isUserInteractionEnabled = context.environment.isEnabled
-        uiView.keyboardType = configuration.keyboardType
-        
-        if let placeholder = configuration.placeholder {
-            uiView.attributedPlaceholder = NSAttributedString(
-                string: placeholder,
-                attributes: [
-                    .font: configuration.uiFont ?? context.environment.font?.toUIFont() as Any,
-                    .paragraphStyle: NSMutableParagraphStyle().then {
-                        $0.alignment = .init(context.environment.multilineTextAlignment)
-                    }
-                ]
-            )
-        } else {
-            uiView.attributedPlaceholder = nil
-            uiView.placeholder = nil
+        setUpInputViews: do {
+            if let inputAccessoryView = configuration.inputAccessoryView {
+                if let _inputAccessoryView = uiView.inputAccessoryView as? UIHostingView<AnyView> {
+                    _inputAccessoryView.rootView = inputAccessoryView
+                } else {
+                    uiView.inputAccessoryView = UIHostingView(rootView: inputAccessoryView)
+                    uiView.inputAccessoryView?.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                }
+            } else {
+                uiView.inputAccessoryView = nil
+            }
+            
+            if let inputView = configuration.inputView {
+                if let _inputView = uiView.inputView as? UIHostingView<AnyView> {
+                    _inputView.rootView = inputView
+                } else {
+                    uiView.inputView = UIHostingView(rootView: inputView)
+                    uiView.inputView?.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                }
+            } else {
+                uiView.inputView = nil
+            }
         }
-        
-        if let returnKeyType = configuration.returnKeyType {
-            uiView.returnKeyType = returnKeyType
-        }
-        
-        if let textColor = configuration.textColor {
-            uiView.textColor = textColor
-        }
-        
-        if let textContentType = configuration.textContentType {
-            uiView.textContentType = textContentType
-        } else {
-            uiView.textContentType = nil
-        }
-        
-        uiView.text = text.wrappedValue
-        uiView.textAlignment = .init(context.environment.multilineTextAlignment)
         
         DispatchQueue.main.async {
             if let isFirstResponder = configuration.isFirstResponder, uiView.window != nil {
@@ -229,7 +245,7 @@ struct _CocoaTextField<Label: View>: UIViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        .init(text: text, configuration: configuration)
+        .init(text: text, isEditing: isEditing, configuration: configuration)
     }
 }
 
@@ -244,7 +260,9 @@ extension CocoaTextField where Label == Text {
     ) {
         self.label = Text(title).foregroundColor(.placeholderText)
         self.text = text
+        self.isEditing = .constant(false)
         self.configuration = .init(onEditingChanged: onEditingChanged, onCommit: onCommit)
+        self.configuration.placeholder = String(title)
     }
     
     public init<S: StringProtocol>(
@@ -269,7 +287,48 @@ extension CocoaTextField where Label == Text {
     ) {
         self.label = label()
         self.text = text
+        self.isEditing = .constant(false)
         self.configuration = .init(onEditingChanged: onEditingChanged, onCommit: onCommit)
+    }
+}
+
+extension CocoaTextField where Label == Text {
+    public init<S: StringProtocol>(
+        _ title: S,
+        text: Binding<String>,
+        isEditing: Binding<Bool>,
+        onCommit: @escaping () -> Void = { }
+    ) {
+        self.label = Text(title).foregroundColor(.placeholderText)
+        self.text = text
+        self.isEditing = isEditing
+        self.configuration = .init(onCommit: onCommit)
+    }
+    
+    public init<S: StringProtocol>(
+        _ title: S,
+        text: Binding<String?>,
+        isEditing: Binding<Bool>,
+        onCommit: @escaping () -> Void = { }
+    ) {
+        self.init(
+            title,
+            text: text.withDefaultValue(String()),
+            isEditing: isEditing,
+            onCommit: onCommit
+        )
+    }
+    
+    public init(
+        text: Binding<String>,
+        isEditing: Binding<Bool>,
+        onCommit: @escaping () -> Void = { },
+        @ViewBuilder label: () -> Text
+    ) {
+        self.label = label()
+        self.text = text
+        self.isEditing = isEditing
+        self.configuration = .init(onCommit: onCommit)
     }
 }
 
@@ -316,22 +375,6 @@ extension CocoaTextField {
         then({ $0.configuration.uiFont = uiFont })
     }
     
-    public func inputAccessoryView<InputAccessoryView: View>(_ view: InputAccessoryView) -> Self {
-        then({ $0.configuration.inputAccessoryView = .init(view) })
-    }
-    
-    public func inputView<InputView: View>(_ view: InputView) -> Self {
-        then({ $0.configuration.inputView = .init(view) })
-    }
-    
-    public func inputAccessoryView<InputAccessoryView: View>(@ViewBuilder _ view: () -> InputAccessoryView) -> Self {
-        then({ $0.configuration.inputAccessoryView = .init(view()) })
-    }
-    
-    public func keyboardType(_ keyboardType: UIKeyboardType) -> Self {
-        then({ $0.configuration.keyboardType = keyboardType })
-    }
-    
     public func placeholder(_ placeholder: String) -> Self {
         then({ $0.configuration.placeholder = placeholder })
     }
@@ -345,17 +388,61 @@ extension CocoaTextField {
         then({ $0.configuration.textColor = foregroundColor })
     }
     
-    public func returnKeyType(_ returnKeyType: UIReturnKeyType) -> Self {
-        then({ $0.configuration.returnKeyType = returnKeyType })
+    public func smartQuotesType(_ smartQuotesType: UITextSmartQuotesType) -> Self {
+        then({ $0.configuration.smartQuotesType = smartQuotesType })
     }
     
-    @available(iOS, deprecated: 13.0, renamed: "foregroundColor(_:)")
+    public func smartDashesType(_ smartDashesType: UITextSmartDashesType) -> Self {
+        then({ $0.configuration.smartDashesType = smartDashesType })
+    }
+    
+    @available(*, deprecated, renamed: "foregroundColor")
     public func textColor(_ foregroundColor: Color) -> Self {
         then({ $0.configuration.textColor = foregroundColor.toUIColor() })
     }
     
     public func textContentType(_ textContentType: UITextContentType?) -> Self {
         then({ $0.configuration.textContentType = textContentType })
+    }
+    
+    public func secureTextEntry(_ isSecureTextEntry: Bool) -> Self {
+        then({ $0.configuration.secureTextEntry = isSecureTextEntry })
+    }
+    
+    public func clearButtonMode(_ clearButtonMode: UITextField.ViewMode) -> Self {
+        then({ $0.configuration.clearButtonMode = clearButtonMode })
+    }
+    
+    // MARK: - Input Accessory -
+    
+    public func inputAccessoryView<InputAccessoryView: View>(_ view: InputAccessoryView) -> Self {
+        then({ $0.configuration.inputAccessoryView = .init(view) })
+    }
+    
+    public func inputView<InputView: View>(_ view: InputView) -> Self {
+        then({ $0.configuration.inputView = .init(view) })
+    }
+    
+    public func inputAccessoryView<InputAccessoryView: View>(@ViewBuilder _ view: () -> InputAccessoryView) -> Self {
+        then({ $0.configuration.inputAccessoryView = .init(view()) })
+    }
+    
+    // MARK: Keyboard
+    
+    public func dismissKeyboardOnReturn(_ dismissKeyboardOnReturn: Bool) -> Self {
+        then({ $0.configuration.dismissKeyboardOnReturn = dismissKeyboardOnReturn })
+    }
+    
+    public func enablesReturnKeyAutomatically(_ enablesReturnKeyAutomatically: Bool) -> Self {
+        then({ $0.configuration.enablesReturnKeyAutomatically = enablesReturnKeyAutomatically })
+    }
+    
+    public func keyboardType(_ keyboardType: UIKeyboardType) -> Self {
+        then({ $0.configuration.keyboardType = keyboardType })
+    }
+    
+    public func returnKeyType(_ returnKeyType: UIReturnKeyType) -> Self {
+        then({ $0.configuration.returnKeyType = returnKeyType })
     }
 }
 
@@ -372,6 +459,48 @@ extension CocoaTextField where Label == Text {
             $0.label = Text(placeholder).kerning(configuration.kerning)
             $0.configuration.placeholder = placeholder
         }
+    }
+}
+
+// MARK: - Auxiliary Implementation -
+
+private final class _UITextField: UITextField {
+    var onDeleteBackward: () -> Void = { }
+    
+    var textRect: CocoaTextField<AnyView>.Rect?
+    var editingRect: CocoaTextField<AnyView>.Rect?
+    var clearButtonRect: CocoaTextField<AnyView>.Rect?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func deleteBackward() {
+        super.deleteBackward()
+        
+        onDeleteBackward()
+    }
+    
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        let original = super.textRect(forBounds: bounds)
+        
+        return textRect?(bounds, original) ?? original
+    }
+    
+    override func editingRect(forBounds bounds: CGRect) -> CGRect {
+        let original = super.editingRect(forBounds: bounds)
+        
+        return editingRect?(bounds, original) ?? original
+    }
+    
+    override func clearButtonRect(forBounds bounds: CGRect) -> CGRect {
+        let original = super.clearButtonRect(forBounds: bounds)
+        
+        return clearButtonRect?(bounds, original) ?? original
     }
 }
 

@@ -13,7 +13,7 @@ extension CGSize {
             height: CGFloat.greatestFiniteMagnitude
         )
     }
-    
+        
     public var minimumDimensionLength: CGFloat {
         min(width, height)
     }
@@ -22,6 +22,12 @@ extension CGSize {
         max(width, height)
     }
     
+    var isAreaZero: Bool {
+        minimumDimensionLength.isZero
+    }
+}
+
+extension CGSize {
     public func dimensionLength(for axis: Axis) -> CGFloat {
         switch axis {
             case .horizontal:
@@ -59,25 +65,24 @@ extension CGSize {
 }
 
 extension CGSize {
-    public static func * (lhs: Self, rhs: CGFloat) -> Self {
+    func rounded(_ rule: FloatingPointRoundingRule) -> Self {
         .init(
-            width: lhs.width * rhs,
-            height: lhs.height * rhs
+            width: width.rounded(rule),
+            height: height.rounded(rule)
         )
     }
-    
-    public static func *= (lhs: inout Self, rhs: CGFloat) {
-        lhs = lhs * rhs
-    }
-    
-    public static func / (lhs: Self, rhs: CGFloat) -> Self {
-        .init(
-            width: lhs.width / rhs,
-            height: lhs.height / rhs
-        )
-    }
-    
-    public static func /= (lhs: inout Self, rhs: CGFloat) {
-        lhs = lhs / rhs
+}
+
+extension CGSize {
+    func fits(_ other: Self) -> Bool {
+        guard width <= other.width else {
+            return false
+        }
+        
+        guard height <= other.height else {
+            return false
+        }
+        
+        return true
     }
 }

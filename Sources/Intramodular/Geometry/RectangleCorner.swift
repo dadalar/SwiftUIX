@@ -6,7 +6,11 @@ import Swift
 import SwiftUI
 
 /// A corner of a rectangle.
-public enum RectangleCorner: Hashable {
+public enum RectangleCorner: CaseIterable, Hashable {
+    public static var allCases: [RectangleCorner] {
+        [.topLeft, .topRight, .bottomLeft, .bottomRight]
+    }
+    
     case topLeft
     case topLeading
     case topRight
@@ -87,6 +91,28 @@ extension UIRectCorner {
                 case .bottomTrailing:
                     formUnion(.bottomRight) // FIXME
             }
+        }
+    }
+}
+
+extension Array where Element == RectangleCorner {
+    public init(_ corners: UIRectCorner) {
+        self.init()
+        
+        if corners.contains(.topLeft) {
+            append(.topLeft)
+        }
+        
+        if corners.contains(.topRight) {
+            append(.topRight)
+        }
+        
+        if corners.contains(.bottomLeft) {
+            append(.bottomLeft)
+        }
+        
+        if corners.contains(.bottomRight) {
+            append(.bottomRight)
         }
     }
 }

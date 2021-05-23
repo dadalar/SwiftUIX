@@ -9,6 +9,24 @@ import SwiftUI
 import UIKit
 
 extension UIScrollView {
+    var insetAdjustedContentSize: CGSize {
+        let contentSize = contentSize.isAreaZero
+            ? ((self as? UICollectionView)?.collectionViewLayout.collectionViewContentSize) ?? .zero
+            : contentSize
+        
+        return CGSize(
+            width: contentSize.width + adjustedContentInset.left + adjustedContentInset.right,
+            height: contentSize.height + adjustedContentInset.bottom + contentInset.top
+        )
+    }
+    
+    var maximumContentOffset: CGPoint  {
+        CGPoint(
+            x: max(0, insetAdjustedContentSize.width - bounds.width),
+            y: max(0, insetAdjustedContentSize.height + safeAreaInsets.top - bounds.height)
+        )
+    }
+    
     var flippedContentOffset: CGPoint {
         get {
             .init(

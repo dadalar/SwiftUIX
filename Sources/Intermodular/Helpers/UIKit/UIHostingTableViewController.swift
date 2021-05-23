@@ -27,28 +27,12 @@ public class UIHostingTableViewController<SectionModel: Identifiable, ItemType: 
     var rowContent: (ItemType) -> RowContent
     
     var scrollViewConfiguration = CocoaScrollViewConfiguration<AnyView>() {
-        didSet {
-            #if os(iOS) || targetEnvironment(macCatalyst)
-            if scrollViewConfiguration.setupRefreshControl == nil {
-                scrollViewConfiguration.setupRefreshControl = { [weak self] in
-                    guard let `self` = self else  {
-                        return
-                    }
-                    
-                    $0.addTarget(
-                        self,
-                        action: #selector(self.refreshChanged),
-                        for: .valueChanged
-                    )
-                }
-            }
-            #endif
-            
+        didSet {            
             tableView?.configure(with: scrollViewConfiguration)
         }
     }
     
-    var initialContentAlignment: Alignment! {
+    var initialContentAlignment: Alignment? {
         didSet {
             guard oldValue != initialContentAlignment else {
                 return
@@ -73,7 +57,7 @@ public class UIHostingTableViewController<SectionModel: Identifiable, ItemType: 
     var isInitialContentAlignmentSet: Bool = false
     
     var isContentOffsetCorrectionEnabled: Bool {
-        if initialContentAlignment.horizontal == .trailing || initialContentAlignment.vertical == .bottom {
+        if initialContentAlignment?.horizontal == .trailing || initialContentAlignment?.vertical == .bottom {
             return true
         } else {
             return false
@@ -191,7 +175,7 @@ public class UIHostingTableViewController<SectionModel: Identifiable, ItemType: 
         _ tableView: UITableView,
         numberOfRowsInSection section: Int
     ) -> Int {
-        data[data.index(data.startIndex, offsetBy: section)].data.count
+        data[data.index(data.startIndex, offsetBy: section)].items.count
     }
     
     // MARK: - Delegate -
@@ -343,9 +327,11 @@ public class UIHostingTableViewController<SectionModel: Identifiable, ItemType: 
             }
         }
         
-        scrollViewConfiguration.onOffsetChange(
-            scrollView.contentOffset(forContentType: AnyView.self)
-        )
+        if let onOffsetChange = scrollViewConfiguration.onOffsetChange {
+            onOffsetChange(
+                scrollView.contentOffset(forContentType: AnyView.self)
+            )
+        }
     }
     
     override public func tableView(
@@ -361,22 +347,16 @@ public class UIHostingTableViewController<SectionModel: Identifiable, ItemType: 
     ) -> IndexPath? {
         nil
     }
-    
-    #if !os(tvOS)
-    @objc public func refreshChanged(_ control: UIRefreshControl) {
-        control.refreshChanged(with: scrollViewConfiguration)
-    }
-    #endif
-    
+        
     override public func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
         super.viewWillTransition(to: size, with: coordinator)
         
         if let lastContentSize = lastContentSize {
-            if initialContentAlignment.horizontal == .trailing {
+            if initialContentAlignment?.horizontal == .trailing {
                 tableView.contentOffset.x += tableView.contentSize.width - lastContentSize.width
             }
             
-            if initialContentAlignment.vertical == .bottom {
+            if initialContentAlignment?.vertical == .bottom {
                 tableView.contentOffset.y += tableView.contentSize.height - lastContentSize.height
             }
         }
@@ -475,11 +455,11 @@ extension UIHostingTableViewController {
             
             var newContentOffset = lastContentOffset
             
-            if initialContentAlignment.horizontal == .trailing {
+            if initialContentAlignment?.horizontal == .trailing {
                 newContentOffset.x += newContentSize.width - oldContentSize.width
             }
             
-            if initialContentAlignment.vertical == .bottom {
+            if initialContentAlignment?.vertical == .bottom {
                 newContentOffset.y += newContentSize.height - oldContentSize.height
             }
             

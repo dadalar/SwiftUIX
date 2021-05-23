@@ -44,21 +44,7 @@ open class UIHostingScrollView<Content: View>: UIScrollView, UIScrollViewDelegat
     private var dragStartContentOffset: CGPoint = .zero
     
     public var configuration = CocoaScrollViewConfiguration<Content>() {
-        didSet {
-            #if os(iOS) || targetEnvironment(macCatalyst)
-            configuration.setupRefreshControl = { [weak self] in
-                guard let `self` = self else {
-                    return
-                }
-                
-                $0.addTarget(
-                    self,
-                    action: #selector(self.refreshChanged),
-                    for: .valueChanged
-                )
-            }
-            #endif
-            
+        didSet {            
             configure(with: configuration)
         }
     }
@@ -124,40 +110,36 @@ open class UIHostingScrollView<Content: View>: UIScrollView, UIScrollViewDelegat
         frame.size.width = min(frame.size.width, contentSize.width)
         frame.size.height = min(frame.size.height, contentSize.height)
         
-        if !isInitialContentAlignmentSet {
-            if contentSize != .zero && frame.size != .zero {
-                setContentAlignment(configuration.initialContentAlignment, animated: false)
-                
-                isInitialContentAlignmentSet = true
-            }
-        } else {
-            if contentSize != oldContentSize {
-                var newContentOffset = contentOffset
-                
-                if contentSize.width >= oldContentSize.width {
-                    if configuration.initialContentAlignment.horizontal == .trailing {
-                        newContentOffset.x += contentSize.width - oldContentSize.width
-                    }
+        if let initialContentAlignment = configuration.initialContentAlignment {
+            if !isInitialContentAlignmentSet {
+                if contentSize != .zero && frame.size != .zero {
+                    setContentAlignment(initialContentAlignment, animated: false)
+                    
+                    isInitialContentAlignmentSet = true
                 }
-                
-                if contentSize.height >= oldContentSize.height {
-                    if configuration.initialContentAlignment.vertical == .bottom {
-                        newContentOffset.y += contentSize.height - oldContentSize.height
+            } else {
+                if contentSize != oldContentSize {
+                    var newContentOffset = contentOffset
+                    
+                    if contentSize.width >= oldContentSize.width {
+                        if initialContentAlignment.horizontal == .trailing {
+                            newContentOffset.x += contentSize.width - oldContentSize.width
+                        }
                     }
-                }
-                
-                if newContentOffset != contentOffset {
-                    setContentOffset(newContentOffset, animated: false)
+                    
+                    if contentSize.height >= oldContentSize.height {
+                        if initialContentAlignment.vertical == .bottom {
+                            newContentOffset.y += contentSize.height - oldContentSize.height
+                        }
+                    }
+                    
+                    if newContentOffset != contentOffset {
+                        setContentOffset(newContentOffset, animated: false)
+                    }
                 }
             }
         }
     }
-    
-    #if !os(tvOS)
-    @objc public func refreshChanged(_ control: UIRefreshControl) {
-        control.refreshChanged(with: configuration)
-    }
-    #endif
     
     // MARK: - UIScrollViewDelegate -
     
@@ -166,10 +148,12 @@ open class UIHostingScrollView<Content: View>: UIScrollView, UIScrollViewDelegat
     }
     
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        configuration.onOffsetChange(
-            scrollView.contentOffset(forContentType: Content.self)
-        )
-        
+        if let onOffsetChange = configuration.onOffsetChange {
+            onOffsetChange(
+                scrollView.contentOffset(forContentType: Content.self)
+            )
+        }
+
         configuration.contentOffset?.wrappedValue = contentOffset
     }
     

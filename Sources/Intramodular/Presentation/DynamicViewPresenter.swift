@@ -8,11 +8,16 @@ import SwiftUI
 
 /// A type that manages view presentation.
 public protocol DynamicViewPresenter: DynamicViewPresentable, EnvironmentProvider {
+    #if os(iOS) || os(macOS) || os(tvOS) || targetEnvironment(macCatalyst)
+    /// The presentation coordinator for this presenter.
+    var _cocoaPresentationCoordinator: CocoaPresentationCoordinator { get }
+    #endif
+    
     /// The presented item.
     var presented: DynamicViewPresentable? { get }
     
     /// Presents a new item.
-    func present(_ item: AnyModalPresentation)
+    func present(_ item: AnyModalPresentation, completion: @escaping () -> Void)
     
     /// Dismisses the currently presented item (if any).
     func dismiss(withAnimation _: Animation?) -> Future<Bool, Never>
@@ -62,6 +67,14 @@ extension DynamicViewPresenter {
 // MARK: - Extensions -
 
 extension DynamicViewPresenter {
+    public func present(_ modal: AnyModalPresentation) {
+        present(modal, completion: { })
+    }
+    
+    public func presentOnTop(_ modal: AnyModalPresentation) {
+        topmostPresenter.present(modal, completion: { })
+    }
+
     public func present<Content: View>(@ViewBuilder content: () -> Content) {
         present(content())
     }
@@ -69,26 +82,26 @@ extension DynamicViewPresenter {
     public func present<V: View>(
         _ view: V,
         named name: ViewName? = nil,
-        onDismiss: (() -> Void)? = nil,
+        onDismiss: @escaping () -> Void = { },
         presentationStyle: ModalPresentationStyle? = nil,
         completion: @escaping () -> Void = { }
     ) {
         present(
-            .init(
-                content: view,
-                contentName: name,
-                presentationStyle: presentationStyle,
-                onPresent: completion,
+            AnyModalPresentation(
+                content: AnyPresentationView(view)
+                    .name(name)
+                    .modalPresentationStyle(presentationStyle ?? .automatic),
                 onDismiss: onDismiss,
-                resetBinding: { }
-            )
+                reset: { }
+            ),
+            completion: completion
         )
     }
     
     public func presentOnTop<V: View>(
         _ view: V,
         named name: ViewName? = nil,
-        onDismiss: (() -> Void)? = nil,
+        onDismiss: @escaping () -> Void = { },
         presentationStyle: ModalPresentationStyle? = nil,
         completion: @escaping () -> () = { }
     ) {
@@ -154,7 +167,7 @@ extension EnvironmentValues {
     public var presenter: DynamicViewPresenter? {
         get {
             #if os(iOS) || os(tvOS) || os(macOS) || targetEnvironment(macCatalyst)
-            return self[DynamicViewPresenterEnvironmentKey.self] ?? _appKitOrUIKitViewController
+            return self[DynamicViewPresenterEnvironmentKey.self] 
             #else
             return self[DynamicViewPresenterEnvironmentKey.self]
             #endif
@@ -169,7 +182,11 @@ extension EnvironmentValues {
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
 extension UIViewController: DynamicViewPresenter {
-    private static var presentationCoordinatorKey: Void = ()
+    private static var presentationCoordinatorKey: UInt = 0
+    
+    public var _cocoaPresentationCoordinator: CocoaPresentationCoordinator {
+        presentationCoordinator
+    }
     
     @objc open var presentationCoordinator: CocoaPresentationCoordinator {
         if let coordinator = objc_getAssociatedObject(self, &UIViewController.presentationCoordinatorKey) {
@@ -187,8 +204,8 @@ extension UIViewController: DynamicViewPresenter {
         presentationCoordinator.presented
     }
     
-    public func present(_ presentation: AnyModalPresentation) {
-        presentationCoordinator.present(presentation)
+    public func present(_ presentation: AnyModalPresentation, completion: @escaping () -> Void) {
+        presentationCoordinator.present(presentation, completion: completion)
     }
     
     @discardableResult
@@ -218,11 +235,13 @@ extension UIViewController: DynamicViewPresenter {
         }
         
         return Future { attemptToFulfill in
-            if let navigationController = self.navigationController, navigationController.visibleViewController == self {
+            if let navigationController = self.navigationController, navigationController.viewControllers.count > 1, navigationController.topViewController == self {
                 navigationController.popViewController(animated: animation != nil)
                 attemptToFulfill(.success(true))
             } else if let presentingViewController = self.presentingViewController {
                 presentingViewController.dismiss(animated: animation != nil) {
+                    (self as? CocoaPresentationHostingController)?.presentation.reset()
+                    
                     attemptToFulfill(.success(true))
                 }
             } else {
@@ -233,12 +252,16 @@ extension UIViewController: DynamicViewPresenter {
 }
 
 extension UIWindow: DynamicViewPresenter {
+    public var _cocoaPresentationCoordinator: CocoaPresentationCoordinator {
+        rootViewController?.presentationCoordinator ?? .init()
+    }
+    
     public var presented: DynamicViewPresentable? {
         rootViewController?.presented
     }
     
-    public func present(_ presentation: AnyModalPresentation) {
-        rootViewController?.present(presentation)
+    public func present(_ presentation: AnyModalPresentation, completion: @escaping () -> Void) {
+        rootViewController?.present(presentation, completion: completion)
     }
     
     @discardableResult
@@ -265,8 +288,12 @@ extension UIWindow: DynamicViewPresenter {
 #elseif os(macOS)
 
 extension NSViewController: DynamicViewPresenter {
-    private static var presentationCoordinatorKey: Void = ()
-    
+    private static var presentationCoordinatorKey: UInt = 0
+
+    public var _cocoaPresentationCoordinator: CocoaPresentationCoordinator {
+        presentationCoordinator
+    }
+
     @objc open var presentationCoordinator: CocoaPresentationCoordinator {
         if let coordinator = objc_getAssociatedObject(self, &NSViewController.presentationCoordinatorKey) {
             return coordinator as! CocoaPresentationCoordinator
@@ -283,8 +310,8 @@ extension NSViewController: DynamicViewPresenter {
         presentationCoordinator.presented
     }
     
-    public func present(_ presentation: AnyModalPresentation) {
-        presentationCoordinator.present(presentation)
+    public func present(_ presentation: AnyModalPresentation, completion: @escaping () -> Void) {
+        presentationCoordinator.present(presentation, completion: completion)
     }
     
     @discardableResult
@@ -327,12 +354,16 @@ extension NSViewController: DynamicViewPresenter {
 }
 
 extension NSWindow: DynamicViewPresenter {
+    public var _cocoaPresentationCoordinator: CocoaPresentationCoordinator {
+        contentViewController?.presentationCoordinator ?? .init()
+    }
+
     public var presented: DynamicViewPresentable? {
         contentViewController?.presented
     }
     
-    public func present(_ presentation: AnyModalPresentation) {
-        contentViewController?.present(presentation)
+    public func present(_ presentation: AnyModalPresentation, completion: @escaping () -> Void) {
+        contentViewController?.present(presentation, completion: completion)
     }
     
     @discardableResult

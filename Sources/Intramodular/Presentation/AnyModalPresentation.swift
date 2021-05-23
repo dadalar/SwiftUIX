@@ -7,93 +7,104 @@ import Swift
 import SwiftUI
 
 public struct AnyModalPresentation: Identifiable {
-    public typealias PreferenceKey = TakeLastPreferenceKey<AnyModalPresentation>
+    public var id: AnyHashable
+    public var content: AnyPresentationView
+    public var onDismiss: () -> Void
+    public var reset: () -> Void
     
-    public let id: UUID
-    
-    public private(set) var content: AnyPresentationView
-    
-    @usableFromInline
-    let resetBinding: () -> ()
-    
-    @usableFromInline
-    init(_ content: AnyPresentationView) {
-        self.id = UUID()
-        self.content = content
-        self.resetBinding = { }
-    }
-    
-    @usableFromInline
-    init<V: View>(
-        id: UUID = UUID(),
-        content: V,
-        contentName: ViewName? = nil,
-        presentationStyle: ModalPresentationStyle? = nil,
-        onPresent: (() -> Void)? = nil,
-        onDismiss: (() -> Void)? = nil,
-        resetBinding: @escaping () -> () = { }
+    init(
+        id: AnyHashable = UUID(),
+        content: AnyPresentationView,
+        onDismiss: @escaping () -> Void = { },
+        reset: @escaping () -> Void = { }
     ) {
         self.id = id
-        self.content = AnyPresentationView(content)
-        self.resetBinding = resetBinding
-        
-        if let presentationStyle = presentationStyle {
-            self.content = self.content.modalPresentationStyle(presentationStyle)
-        }
-        
-        if let name = contentName {
-            self.content = self.content.name(name)
-        }
+        self.content = content
+        self.onDismiss = onDismiss
+        self.reset = reset
     }
 }
 
 extension AnyModalPresentation {
-    public func mergeEnvironmentBuilder(_ builder: EnvironmentBuilder) -> Self {
+    public var style: ModalPresentationStyle {
+        content.modalPresentationStyle
+    }
+    
+    public var popoverAttachmentAnchorBounds: CGRect? {
+        content.popoverAttachmentAnchorBounds
+    }
+    
+    public func popoverAttachmentAnchorBounds(_ bounds: CGRect?) -> Self {
         var result = self
         
-        result.mergeEnvironmentBuilderInPlace(builder)
+        result.content = result.content.popoverAttachmentAnchorBounds(bounds)
         
         return result
     }
-    
-    public mutating func mergeEnvironmentBuilderInPlace(_ builder: EnvironmentBuilder) {
-        content.mergeEnvironmentBuilderInPlace(builder)
-    }
 }
 
-// MARK: - Protocol Conformances -
+// MARK: - Conformances -
 
 extension AnyModalPresentation: Equatable {
     public static func == (lhs: AnyModalPresentation, rhs: AnyModalPresentation) -> Bool {
-        lhs.id == rhs.id
+        true
+            && lhs.id == rhs.id
+            && lhs.popoverAttachmentAnchorBounds == rhs.popoverAttachmentAnchorBounds
     }
 }
 
 // MARK: - API -
 
 extension View {
-    @inlinable
+    /// Adds a condition for whether the presented view hierarchy is dismissable.
+    public func dismissDisabled(_ value: Bool) -> some View {
+        modifier(_SetDismissDisabled(disabled: value))
+    }
+    
+    @available(*, deprecated, renamed: "dismissDisabled")
     public func isModalInPresentation(_ value: Bool) -> some View {
-        #if os(iOS) || targetEnvironment(macCatalyst)
-        return onUIViewControllerResolution {
-            $0.isModalInPresentation = value
-        }
-        .preference(key: IsModalInPresentation.self, value: value)
-        #else
-        return preference(key: IsModalInPresentation.self, value: value)
-        #endif
+        dismissDisabled(value)
     }
 }
 
 // MARK: - Auxiliary Implementation -
 
-@usableFromInline
-struct IsModalInPresentation: PreferenceKey {
-    @usableFromInline
+extension AnyModalPresentation {
+    struct PreferenceKeyValue: Equatable {
+        let presentationID: AnyHashable
+        let presentation: AnyModalPresentation?
+    }
+    
+    typealias PreferenceKey = TakeLastPreferenceKey<PreferenceKeyValue>
+}
+
+struct _DismissDisabled: PreferenceKey {
     static let defaultValue: Bool = false
     
-    @usableFromInline
     static func reduce(value: inout Bool, nextValue: () -> Bool) {
         value = nextValue()
+    }
+}
+
+struct _SetDismissDisabled: ViewModifier {
+    let disabled: Bool
+    
+    #if os(iOS) || targetEnvironment(macCatalyst)
+    @State var viewControllerBox = WeakReferenceBox<AppKitOrUIKitViewController>(nil)
+    #endif
+    
+    func body(content: Content) -> some View {
+        #if os(iOS) || targetEnvironment(macCatalyst)
+        return content.onAppKitOrUIKitViewControllerResolution { viewController in
+            viewControllerBox.value = viewController.root ?? viewController
+            viewControllerBox.value?.isModalInPresentation = disabled
+        }
+        .preference(key: _DismissDisabled.self, value: disabled)
+        .onChange(of: disabled) { disabled in
+            viewControllerBox.value?.isModalInPresentation = disabled
+        }
+        #else
+        return content.preference(key: _DismissDisabled.self, value: disabled)
+        #endif
     }
 }

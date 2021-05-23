@@ -23,11 +23,7 @@ public enum ModalPresentationStyle: Equatable {
     #endif
     
     #if os(iOS) || targetEnvironment(macCatalyst)
-    case popover(permittedArrowDirections: UIPopoverArrowDirection)
-    
-    public static var popover: Self {
-        return .popover(permittedArrowDirections: .any)
-    }
+    case popover(permittedArrowDirections: PopoverArrowDirection = .all, attachmentAnchor: PopoverAttachmentAnchor = .rect(.bounds))
     #endif
     
     case automatic
@@ -98,6 +94,25 @@ extension View {
 // MARK: - Auxiliary Implementation -
 
 extension ModalPresentationStyle {
+    public enum _Comparison {
+        case popover
+    }
+    
+    public static func == (lhs: Self, rhs: _Comparison) -> Bool {
+        #if os(iOS) || targetEnvironment(macCatalyst)
+        switch (lhs, rhs) {
+            case (.popover, .popover):
+                return true
+            default:
+                return false
+        }
+        #else
+        return false
+        #endif
+    }
+}
+
+extension ModalPresentationStyle {
     @usableFromInline
     struct EnvironmentKey: SwiftUI.EnvironmentKey {
         @usableFromInline
@@ -118,7 +133,7 @@ extension EnvironmentValues {
 #if os(iOS) || os(tvOS) || targetEnvironment(macCatalyst)
 
 extension ModalPresentationStyle {
-    public var transitioningDelegate: UIViewControllerTransitioningDelegate? {
+    public func toTransitioningDelegate() -> UIViewControllerTransitioningDelegate? {
         if case let .custom(delegate) = self {
             return delegate
         } else {
@@ -185,14 +200,22 @@ extension UIViewController {
             #endif
             #if os(iOS) || targetEnvironment(macCatalyst)
             case .popover:
-                return .popover(permittedArrowDirections: popoverPresentationController?.permittedArrowDirections ?? .any)
+                return .popover(
+                    permittedArrowDirections: .init(popoverPresentationController?.permittedArrowDirections ?? .any)
+                )
             #endif
             case .automatic:
                 return .automatic
             case .none:
                 return .none
             case .custom:
-                return .custom(transitioningDelegate!)
+                if let transitioningDelegate = transitioningDelegate {
+                    return .custom(transitioningDelegate)
+                } else {
+                    assertionFailure("transitioningDelegate is nil")
+                    
+                    return .automatic
+                }
             @unknown default:
                 return .automatic
         }
